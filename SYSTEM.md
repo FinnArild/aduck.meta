@@ -135,19 +135,19 @@ Salesforce-org  ──per-org API-nøkkel──▶  Rust /api/generate
 
 **Rust håndhever. Django konfigurerer.**
 
-### Rust-siden `[GAP: quota_total]`
+### Rust-siden `[IMPLEMENTERT — branch `feature/admin-key-api`]`
 
-- `api_keys` utvides med `quota_total INTEGER` — livstids antall transformeringer gitt
-  (trial + alle kjøp), satt av Django.
-- `monthly_limit` beholdes som **valgfri** rate-limit (finnes allerede, håndheves via
-  `db::calls_this_month`).
-- Håndheving i `aduck/src/api.rs` `check_api_key`: hvis
-  `db::calls_total(key) >= quota_total` → avvis kallet.
-- **HTTP-status for oppbrukt kvote:** bruk `402 Payment Required`, atskilt fra `401`
-  (feil/manglende nøkkel) og `400` (org-mismatch). Da kan
-  `aduck.sf/.../classes/AduckTransformationService.cls` vise «kvoten er brukt opp,
-  kjøp mer på aduck.no» i stedet for en generisk feil.
-  Beslutning: **402**. (Alternativ vurdert: 401 — forkastet, ikke skillbar fra feil nøkkel.)
+- `api_keys` har fått `quota_total INTEGER` — livstids antall transformeringer gitt
+  (trial + alle kjøp), satt av Django. `None` = ingen kvote.
+- `monthly_limit` beholdt som **valgfri** rate-limit (håndheves via
+  `db::calls_this_month` i `check_api_key`, som før).
+- Håndheving i `aduck/src/api.rs` `generate` (ikke `check_api_key`, se under): hvis
+  `db::calls_total(key) >= quota_total` → `402`.
+- **HTTP-status for oppbrukt kvote:** `402 Payment Required`, atskilt fra `401`
+  (feil/manglende nøkkel) og `400` (org-mismatch). Håndhevet i handleren og ikke i
+  `check_api_key`, nettopp fordi `SecurityScheme`-checkeren bare kan svare `401`.
+  `aduck.sf/.../AduckTransformationService.cls` bør vise «kvoten er brukt opp, kjøp
+  mer på aduck.no» på `402`.  `[GAP i aduck.sf]`
 
 ### Django-siden `[GAP]`
 
@@ -159,54 +159,78 @@ Salesforce-org  ──per-org API-nøkkel──▶  Rust /api/generate
 
 ---
 
-## 5. Rust admin-API (nytt) `[GAP]`
+## 5. Rust admin-API `[IMPLEMENTERT — branch `feature/admin-key-api`]`
 
-Alle krever `X-API-Key: <ADUCK_API_KEY>` (admin). Implementeres i:
-- `aduck/src/api.rs` — ny `KeyAdmin` `#[OpenApi]`-struct, registreres i `main.rs`
-  ved siden av `Generate` og `Health`.
-- `aduck/src/db.rs` — nye funksjoner: `create_key`, `update_key`, `get_key`,
-  `usage_summary`, `calls_total`.
+Alle krever `X-API-Key: <ADUCK_API_KEY>` (admin-nøkkelen). En vanlig kundenøkkel
+avvises med `401`. Uten databasetilkobling svarer de `503`.
+
+**Django lager selv nøkkelverdien** (som den lager kontonøkler) og sender den i
+`api_key`-feltet. Rust genererer den ikke — den bare lagrer og håndhever.
 
 | Metode & path | Body / query | Svar |
 |---|---|---|
-| `POST /api/keys` | `{salesforce_org_id, label, quota_total, monthly_limit?}` | `{api_key}` |
-| `PATCH /api/keys/{api_key}` | `{quota_total?, active?, label?}` | oppdatert record |
-| `GET /api/keys/{api_key}` | – | record + `{used}` |
-| `GET /api/usage?key=<api_key>` | – | `{used, quota_total, monthly_used, events: [...]}` |
+| `POST /api/keys` | `{api_key, salesforce_org_id?, label?, quota_total?, monthly_limit?}` | `200` `KeyInfo` |
+| `GET /api/keys/{api_key}` | – | `200` `KeyInfo` / `404` |
+| `PATCH /api/keys/{api_key}` | `{quota_total?, active?, label?}` (utelatt felt = uendret) | `200` `KeyInfo` / `404` |
+| `GET /api/usage?key=<api_key>` | – | `200` `UsageSummary` / `404` |
 
-Gjenbruk:
-- `constant_time_eq` + admin-grenen i `check_api_key` (`aduck/src/api.rs`) for auth.
-- `db::connect`s `CREATE TABLE IF NOT EXISTS api_keys (...)` — legg til `quota_total`.
-- `db::calls_this_month` som mal for `calls_total` (samme spørring uten
-  `created_at >=`-filteret).
+- `KeyInfo` = `{api_key, salesforce_org_id, monthly_limit, quota_total, active, used_total, used_this_month}`
+- `UsageSummary` = `{api_key, quota_total, used_total, used_this_month, events: [{salesforce_org_id, template_bytes, duration_ms, created_at}]}` (siste 100, nyeste først; `created_at` = unix-sekunder UTC)
+
+Implementert i:
+- `aduck/src/api.rs` — `KeyAdmin` `#[OpenApi]`-struct, registrert i `main.rs`
+  ved siden av `Generate` og `Health`. Gjenbruker `ApiKeyAuth` + `require_admin`.
+- `aduck/src/db.rs` — `create_key`, `update_key`, `calls_total`, `recent_usage`;
+  `ApiKeyRecord` + `api_keys`-skjemaet fikk `quota_total` (med idempotent
+  `ALTER TABLE` for eksisterende databaser).
 
 ---
 
-## 6. Django-modeller (nytt) `[GAP]`
+## 6. Django-siden `[IMPLEMENTERT — branch `feature/aduck-accounts`]`
 
-I `finnarild-django/aduck/models.py` (i dag: kun `AccessRequest`):
+Modeller (`finnarild-django/aduck/models.py`):
 
-- **`Account`** — `OneToOneField(User)`, `registration_key` (hashet),
-  `org_limit` (default f.eks. `3`), `created_at`.
-- **`OrgRegistration`** — `account` FK, `salesforce_org_id` (unik), `is_sandbox` (bool),
-  `api_key` (per-org-nøkkelen fra Rust, eller bare en referanse hvis den ikke skal
-  lagres i klartekst), `created_at`.
-- **`Purchase`** — `account` FK, `transforms` (int), `stripe_session_id`, `paid_at`.
-- **`AccessRequest`** — behold for «be om tilgang»-skjemaet på `pricing/`, eller
-  pensjoner når self-serve er live.
+- **`Account`** — `OneToOneField(User)`, `registration_key_hash` (Django `make_password`),
+  `org_limit` (default `3`), `created_at`. `generate_registration_key()` gir rånøkkelen
+  én gang; `verify_key(raw)` slår opp. **Merk:** `verify_key` scanner alle `Account` og
+  kjører `check_password` per rad — O(n) med dyr hashing. Greit nå; bytt til et
+  prefiks-/lookup-skjema om brukertallet vokser.
+- **`OrgRegistration`** — `account` FK, `salesforce_org_id` (unik), `is_sandbox`,
+  `api_key` (per-org-nøkkelen, lagret i **klartekst** — lav verdi, kan tilbakekalles via
+  Rust admin-API; kommentert i koden), `label`, `created_at`.
+- **`Purchase`** — `account` FK, `transforms`, `stripe_session_id`, `paid_at`, `created_at`.
+  Stripe-webhook er en TODO-stub. `total_quota(account)` = `ADUCK_TRIAL_TRANSFORMS` +
+  sum av betalte kjøp.
+- **`AccessRequest`** — beholdt for «be om tilgang»-skjemaet på `pricing/`.
+
+**Django lager per-org-nøkkelen selv** (`'aduck_' + secrets.token_urlsafe(32)`) og sender
+den som `api_key` i `POST /api/keys`. Rust genererer den ikke.
+
+Klient mot Rust admin-API: `finnarild-django/aduck/aduck_api.py`
+(`create_key` / `update_key` / `get_usage`, `AduckApiError`). Forventer at
+`GET /api/usage` gir feltene `used_total`, `used_this_month`, `quota_total`, `events`
+(matcher `UsageSummary` i §5).
 
 Views (`finnarild-django/aduck/views.py`):
-- `register` `[FINNES]` — utvid til å opprette `Account` + kontonøkkel.
-- Ny `register_org` — tar `org_id` + `sandbox`, sjekker kontonøkkel/`org_limit`,
-  kaller Rust `POST /api/keys`, viser Base URL + API-nøkkel.
-- `account_dashboard` `[FINNES, tom]` — koble til Rust `GET /api/usage`.
+- `register` — oppretter `User` + `Account`, logger inn, viser rånøkkelen én gang
+  (`registered.html`); bærer `?org_id=` videre.
+- `register_org` (login_required) — håndhever `org_limit`, avviser org registrert på
+  annen konto, idempotent for samme konto, kaller `aduck_api.create_key(...)` med
+  `quota_total = total_quota(account)`, viser Base URL + `Api_Key__c`.
+- `account_dashboard` — henter forbruk per org via `aduck_api.get_usage`, hver i
+  try/except så én feil ikke velter siden.
 
-Ruting: `finnarild-django/finnarild/urls.py` inkluderer **ikke** `aduck.urls`.
-`VirtualHostMiddleware` setter `request.urlconf = 'aduck.urls'` for `aduck.no`.
-Ny ruting legges derfor i `finnarild-django/aduck/urls.py`.
+Ruting: `finnarild/urls.py` inkluderer **ikke** `aduck.urls` — `VirtualHostMiddleware`
+setter `request.urlconf = 'aduck.urls'` for `aduck.no`. Ny rute: `/register/org/`.
+Fikset samtidig: `LoginView` fikk `next_page` (kun gyldig for `LogoutView`), som fikk
+hele `aduck.urls` til å feile ved import.
 
-Innstillinger (`finnarild-django/finnarild/settings.py`):
-`ADUCK_API_BASE_URL`, `ADUCK_ADMIN_API_KEY`, `ADUCK_TRIAL_TRANSFORMS`, Stripe-nøkler.
+Innstillinger (`finnarild/settings.py`): `ADUCK_API_BASE_URL`, `ADUCK_ADMIN_API_KEY`,
+`ADUCK_TRIAL_TRANSFORMS` (env-drevet). Migrasjon `0002` ikke kjørt.
+
+**Gjenstår:** `aduck.sf` sin registreringslenke peker på `/register/?org_id=…` mens
+Django-ruten er `/accounts/register/` — må forenes (§3.2). Sidemaler er norske, mens
+`base.html`-chrome er engelsk.
 
 ---
 
@@ -259,22 +283,21 @@ Rust-DB og Django-DB er **separate**. Eneste kobling mellom dem er admin-HTTP-AP
 
 | # | Gap | Blokkerer |
 |---|---|---|
-| 1 | Rust har ingen provisjonerings-endpoint (§5 er ubygd). | Hele self-serve-flyten. |
-| 2 | `quota_total` finnes ikke i `api_keys` (§4). | Trial og kjøp. |
-| 3 | Django `Account` / `OrgRegistration` / `Purchase` finnes ikke (§6). | Kontonøkkel, sandbox-registrering, dashboard. |
-| 4 | Ingen registreringslenke/LWC i `aduck.sf` (§3.2). | Onboarding-flyt. |
+| 1 | ~~Rust provisjonerings-endpoint~~ **gjort** — branch `feature/admin-key-api` (§5). Ikke bygd/testet lokalt (ingen Rust-toolchain på maskinen); bygg på pike/Windows før merge. | – |
+| 2 | ~~`quota_total` i `api_keys`~~ **gjort** — samme branch (§4). | – |
+| 3 | ~~Django `Account` / `OrgRegistration` / `Purchase` + views + dashboard~~ **gjort** — branch `feature/aduck-accounts` (§6). Migrasjon ikke kjørt; ikke deployet. | – |
+| 4 | Ingen registreringslenke/LWC i `aduck.sf`, og Django-ruten (`/accounts/register/`) matcher ikke lenken SYSTEM.md §3.2 antar (`/register/`) (§3.2, §7). | Onboarding-flyt. |
 | 5 | Kontonøkkel-format og -lagring ikke bestemt. Anbefaling: `secrets.token_urlsafe(32)`, lagret hashet, vist én gang. | §6. |
-| 6 | 402 vs 401 for oppbrukt kvote — **besluttet: 402** (§4). `aduck.sf` må håndtere den (§7). | Feilmelding til sluttbruker. |
+| 6 | 402 for oppbrukt kvote — **besluttet og implementert i Rust** (§4). `aduck.sf` må håndtere den (§7). | Feilmelding til sluttbruker. |
 | 7 | Ingen auth mellom Django og Rust utover delt admin-nøkkel. Godtatt for nå. | – |
 | 8 | `aduck/SALESFORCE.md` og `finnarild-django/docs/aduck-ecosystem.md` har utdaterte URL-er / stier (§1). | Dokumentasjonssamsvar. |
 | 9 | `aduck.sf` er umanagd — ingen én-klikks install-lenke (§7). | AppExchange / enkel install. |
 | 10 | Betaling: Stripe-integrasjon i Django ikke påbegynt. | Kjøp av flere transformeringer. |
 
-### Anbefalt rekkefølge for implementasjon (egne planer)
+### Anbefalt rekkefølge for implementasjon
 
-1. Rust: `quota_total` + admin-API (§5, §4). Uten dette kan ingenting annet testes ende-til-ende.
-2. Django: `Account` + kontonøkkel + `register_org`-view som kaller Rust (§6, §3.3–3.5).
-3. Django: `account_dashboard` mot `GET /api/usage` (§3.8).
-4. `aduck.sf`: registreringslenke + `salesforce_org_id` i body + 402-håndtering (§7).
-5. Django: Stripe + `Purchase` + `PATCH /api/keys` (§3.9).
-6. `aduck.sf`: managed 2GP-pakke for install-lenke (§7).
+1. ~~Rust: `quota_total` + admin-API~~ — **gjort**, branch `feature/admin-key-api`, bygd + testet på janeway (cargo check/test/clippy grønt). Gjenstår: PR-review + merge + deploy.
+2. ~~Django: `Account` + kontonøkkel + `register_org` + `account_dashboard`~~ — **gjort**, branch `feature/aduck-accounts`. Gjenstår: PR-review + `manage.py migrate` + deploy + sett env-varene.
+3. `aduck.sf`: registreringslenke (fra `$Organization.Id`) + `salesforce_org_id` i `/api/generate`-body + 402-håndtering i `AduckTransformationService` (§7). Foren Django-ruten med lenken (§3.2).
+4. Django: Stripe + `Purchase.paid_at` + webhook som kaller `PATCH /api/keys` (§3.9).
+5. `aduck.sf`: managed 2GP-pakke for install-lenke (§7).
