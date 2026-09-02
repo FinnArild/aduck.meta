@@ -266,8 +266,8 @@ ikke kjørt, ikke deployet.
 | `ADUCK_API_KEY` | ja | Admin-/fallback-nøkkel. Tjenesten starter ikke uten. |
 | `DATABASE_URL` | nei | Postgres (Heroku). Faller tilbake til `sqlite://aduck.db?mode=rwc`. DB er ikke-fatal: uten den godtas kun `ADUCK_API_KEY`. |
 | `PORT` / `ADUCK_BIND` | nei | `PORT` → `0.0.0.0:$PORT` (Heroku-stil). Ellers `ADUCK_BIND` (default `127.0.0.1:3000`). |
-| `ADUCK_PUBLIC_URL` | nei | OpenAPI/Swagger `server`-URL. Sett til `https://api.aduck.no/api` i prod. Uten den: `http://{bind}/api` (kun nyttig lokalt). |
-| `ADUCK_ALLOWED_CIDR_FILE` | nei | IPv4 CIDR-allowlist (Salesforce-IP-ranges). `aduck.heroku/allowed_cidrs.txt`. Siste ledd i `X-Forwarded-For` sjekkes — forutsetter at Heroku er eneste hopp (ingen proxy/CDN foran `api.aduck.no`). |
+| `ADUCK_PUBLIC_URL` | nei | OpenAPI/Swagger `server`-URL. Satt til `https://api.aduck.no/api` i prod. Uten den: `http://{bind}/api` (kun nyttig lokalt). |
+| `ADUCK_ALLOWED_CIDR_FILE` | nei | IPv4 CIDR-allowlist (`aduck.heroku/allowed_cidrs.txt`). **Ikke satt i prod nå** — slått av så Django (dynamiske Heroku-dyno-IP-er) når admin-API-et; auth er da kun API-nøklene. Hvis den slås på igjen: siste ledd i `X-Forwarded-For` sjekkes, så ingen proxy/CDN kan stå foran `api.aduck.no`. |
 
 Bygg for release/Heroku: `x86_64-unknown-linux-musl`,
 `cargo build --release --no-default-features --features postgres` (ren Rust
