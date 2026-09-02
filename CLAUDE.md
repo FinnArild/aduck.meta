@@ -29,5 +29,5 @@ dokumentasjonen som binder dem sammen (`SYSTEM.md`).
 ## Kanoniske verdier (se SYSTEM.md §1 for full liste)
 
 - Registreringsside: `https://aduck.no/`
-- Prod-API: `https://aduck-eeb24b32f565.herokuapp.com`
+- Prod-API: `https://api.aduck.no` (`aduck-eeb24b32f565.herokuapp.com` svarer fortsatt)
 - Kjerne-endpoint: `POST {base}/api/generate`, header `X-API-Key`
