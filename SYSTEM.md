@@ -287,23 +287,38 @@ Rust-DB og Django-DB er **separate**. Eneste kobling mellom dem er admin-HTTP-AP
 
 ## 9. Åpne spørsmål / gap
 
+> **Status 2026-09-02:** steg 1–3 implementert og pushet på hvert repos `main`/`master`.
+> Rust-API-et er **deployet** (Heroku-app `aduck`, release v17) og svarer på
+> `https://api.aduck.no` (§1). IP-allowlisten er slått av (§8). Gjenstår før
+> konto-/kvoteflyten virker ende-til-ende: `finnarild` mangler config-varene, Django
+> er ikke deployet, migrasjon `0002` ikke kjørt, `aduck.sf` ikke deployet til en org.
+> Se «Neste» nederst.
+
 | # | Gap | Blokkerer |
 |---|---|---|
-| 1 | ~~Rust provisjonerings-endpoint~~ **gjort** — branch `feature/admin-key-api` (§5). Verifisert lokalt: `cargo test`/`clippy --no-default-features --features postgres` grønt. Release-bygget (`--target x86_64-unknown-linux-musl`) trenger `musl-tools` (`musl-gcc`) pga. `ring`/`tls-rustls` — ikke installert på maskinen. | – |
-| 2 | ~~`quota_total` i `api_keys`~~ **gjort** — samme branch (§4). | – |
-| 3 | ~~Django `Account` / `OrgRegistration` / `Purchase` + views + dashboard~~ **gjort** — branch `feature/aduck-accounts` (§6). Migrasjon ikke kjørt; ikke deployet. | – |
-| 4 | ~~Ingen registreringslenke/LWC i `aduck.sf`; Django-rute-mismatch~~ **gjort** (uncommitted): `Aduck Setup`-fane/LWC i `aduck.sf`, Django-rute flyttet til `/register/` (§3.2, §6). | – |
+| 1 | ~~Rust provisjonerings-endpoint~~ **gjort + deployet** — merget til `aduck` `main` (`d150acb`), bygd `x86_64-unknown-linux-musl --no-default-features --features postgres` på maskinen, release v15. | – |
+| 2 | ~~`quota_total` i `api_keys`~~ **gjort + deployet** — samme (§4). Skjemaendring kjøres ved oppstart; ren oppstart i loggen v15. | – |
+| 3 | ~~Django `Account` / `OrgRegistration` / `Purchase` + views + dashboard~~ **gjort**, merget til `master` (`9dff702`, `49fc685`). Migrasjon `0002` ikke kjørt; ikke deployet; config-varene ikke satt på `finnarild`. | Konto-/kvoteflyt |
+| 4 | ~~Ingen registreringslenke/LWC i `aduck.sf`; Django-rute-mismatch~~ **gjort** — `Aduck Setup`-fane/LWC (`aduck.sf` `c2d8a4a`), Django-rute `/register/` (§3.2, §6). | – |
 | 5 | Kontonøkkel-format og -lagring ikke bestemt. Anbefaling: `secrets.token_urlsafe(32)`, lagret hashet, vist én gang. | §6. |
-| 6 | ~~402 for oppbrukt kvote~~ **gjort** — implementert i Rust (§4) og håndtert i `aduck.sf` `AduckTransformationService` (§7, uncommitted). | – |
-| 7 | Ingen auth mellom Django og Rust utover delt admin-nøkkel. Godtatt for nå. | – |
-| 8 | `aduck/SALESFORCE.md` og `finnarild-django/docs/aduck-ecosystem.md` har utdaterte URL-er / stier (§1). | Dokumentasjonssamsvar. |
+| 6 | ~~402 for oppbrukt kvote~~ **gjort** — Rust (deployet) + `aduck.sf` `AduckTransformationService` (`c2d8a4a`, ikke deployet til org ennå). | – |
+| 7 | Auth mellom Django og Rust er kun den delte admin-nøkkelen (`ADUCK_API_KEY`). IP-allowlisten er av (§8). Godtatt for nå. | – |
+| 8 | ~~`aduck/SALESFORCE.md` §1 utdatert URL~~ **gjort** (`92806c2`). `finnarild-django/docs/aduck-ecosystem.md` har fortsatt Windows-stier og gammel struktur, men endpoint-notatene er rettet. | Dokumentasjonssamsvar. |
 | 9 | `aduck.sf` er umanagd — ingen én-klikks install-lenke (§7). | AppExchange / enkel install. |
 | 10 | Betaling: Stripe-integrasjon i Django ikke påbegynt. | Kjøp av flere transformeringer. |
 
 ### Anbefalt rekkefølge for implementasjon
 
-1. ~~Rust: `quota_total` + admin-API~~ — **gjort**, branch `feature/admin-key-api`, bygd + testet på janeway (cargo check/test/clippy grønt). Gjenstår: PR-review + merge + deploy.
-2. ~~Django: `Account` + kontonøkkel + `register_org` + `account_dashboard`~~ — **gjort**, branch `feature/aduck-accounts`. Gjenstår: PR-review + `manage.py migrate` + deploy + sett env-varene.
-3. ~~`aduck.sf`: registreringslenke + `salesforce_org_id` i body + 402-håndtering; foren Django-ruten~~ — **gjort** (uncommitted). Gjenstår: `sf project deploy start` mot en org + Apex-testkjøring, og `git push heroku master` for Django-ruten. `aduck.sf/SALESFORCE.md` §1 har fortsatt gammel endpoint-URL (gap 8).
+1. ~~Rust: `quota_total` + admin-API~~ — **gjort + deployet** (release v17).
+2. ~~Django: `Account` + kontonøkkel + `register_org` + `account_dashboard`~~ — **gjort**, på `master`. Gjenstår: se «Neste».
+3. ~~`aduck.sf`: registreringslenke + `salesforce_org_id` i body + 402-håndtering; foren Django-ruten; prod-API på `api.aduck.no`~~ — **gjort**, på `main`. Gjenstår: `sf project deploy start` mot en org + Apex-testkjøring.
 4. Django: Stripe + `Purchase.paid_at` + webhook som kaller `PATCH /api/keys` (§3.9).
 5. `aduck.sf`: managed 2GP-pakke for install-lenke (§7).
+
+### Neste (plukk opp her)
+
+1. **`finnarild` config-varer:** `heroku config:set ADUCK_ADMIN_API_KEY=<`aduck`-appens `ADUCK_API_KEY`> -a finnarild`. `ADUCK_API_BASE_URL` faller tilbake til `https://api.aduck.no` i koden, men kan settes eksplisitt.
+2. **Deploy Django:** `git push heroku master` fra `finnarild-django/`, så `heroku run python manage.py migrate -a finnarild` (migrasjon `0002`).
+3. **Verifiser** konto-dashbordet mot `api.aduck.no` (`/api/keys`, `/api/usage`) — skal ikke lenger gi 403 (allowlist av).
+4. **`aduck.sf` → org:** `sf project deploy start` + `sf apex run test`, sett `Aduck_Api_Setting__c.Base_URL__c = https://api.aduck.no` i orgen.
+5. Deretter gap 5 (kontonøkkel-lagring) og gap 10 (Stripe).
