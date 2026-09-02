@@ -95,12 +95,14 @@ Salesforce-org  ──per-org API-nøkkel──▶  Rust /api/generate
    (`sf project deploy start` → `sf org assign permset -n Aduck_User`).
    `[GAP]` én-klikks install: krever managed 2GP-pakke, se §7.
 
-2. **Admin sendes til registrering.** Pakkens README, eller en setup-LWC, lenker til:
+2. **Admin sendes til registrering.** `Aduck Setup`-fanen (LWC `aduckSetup` +
+   `AduckSetupController`) viser org-ID + sandbox-flagg og en knapp til:
    ```
    https://aduck.no/register/?org_id=<OrgId>[&sandbox=true]
    ```
    `<OrgId>` = `UserInfo.getOrganizationId()` (Apex) / `$Organization.Id` (Flow/LWC).
-   `[GAP]` denne lenken/LWC-en finnes ikke i pakken ennå.
+   `[IMPLEMENTERT — aduck.sf, uncommitted]` Django-ruten er nå `/register/` (§6), så
+   lenken treffer. `[GAP]` LWC-en lenker ut, men limer ikke inn nøkkelen automatisk.
 
 3. **Django: konto.** Bruker registrerer seg eller logger inn (`views.register`
    `[FINNES]` — bruker `UserCreationForm`; login/logout `[FINNES]`). Ved første gangs
@@ -146,8 +148,8 @@ Salesforce-org  ──per-org API-nøkkel──▶  Rust /api/generate
 - **HTTP-status for oppbrukt kvote:** `402 Payment Required`, atskilt fra `401`
   (feil/manglende nøkkel) og `400` (org-mismatch). Håndhevet i handleren og ikke i
   `check_api_key`, nettopp fordi `SecurityScheme`-checkeren bare kan svare `401`.
-  `aduck.sf/.../AduckTransformationService.cls` bør vise «kvoten er brukt opp, kjøp
-  mer på aduck.no» på `402`.  `[GAP i aduck.sf]`
+  `aduck.sf/.../AduckTransformationService.cls` viser «kvoten er brukt opp, kjøp
+  mer på aduck.no» på `402`.  `[IMPLEMENTERT — aduck.sf, uncommitted]`
 
 ### Django-siden `[GAP]`
 
@@ -221,16 +223,17 @@ Views (`finnarild-django/aduck/views.py`):
   try/except så én feil ikke velter siden.
 
 Ruting: `finnarild/urls.py` inkluderer **ikke** `aduck.urls` — `VirtualHostMiddleware`
-setter `request.urlconf = 'aduck.urls'` for `aduck.no`. Ny rute: `/register/org/`.
-Fikset samtidig: `LoginView` fikk `next_page` (kun gyldig for `LogoutView`), som fikk
-hele `aduck.urls` til å feile ved import.
+setter `request.urlconf = 'aduck.urls'` for `aduck.no`. Ruter: `/register/` (var
+`/accounts/register/`, flyttet for å matche §3.2) og `/register/org/`. `register`-viewet
+sender allerede innloggede kontoer rett videre til `register_org` med query-strengen
+intakt (sandbox-flyten, §3.6). Fikset samtidig: `LoginView` fikk `next_page` (kun gyldig
+for `LogoutView`), som fikk hele `aduck.urls` til å feile ved import.
 
 Innstillinger (`finnarild/settings.py`): `ADUCK_API_BASE_URL`, `ADUCK_ADMIN_API_KEY`,
 `ADUCK_TRIAL_TRANSFORMS` (env-drevet). Migrasjon `0002` ikke kjørt.
 
-**Gjenstår:** `aduck.sf` sin registreringslenke peker på `/register/?org_id=…` mens
-Django-ruten er `/accounts/register/` — må forenes (§3.2). Sidemaler er norske, mens
-`base.html`-chrome er engelsk.
+**Gjenstår:** Sidemaler er norske, mens `base.html`-chrome er engelsk. Migrasjon `0002`
+ikke kjørt, ikke deployet.
 
 ---
 
@@ -242,11 +245,12 @@ Django-ruten er `/accounts/register/` — må forenes (§3.2). Sidemaler er nors
   limer det inn.
 - **`salesforce_org_id` i requesten:** `GenerateRequest` i `aduck/src/api.rs` tar et
   valgfritt `salesforce_org_id`. Når per-org-nøkkelen har en registrert org, avvises
-  mismatch med `400 OrgMismatch`. `aduck.sf` bør sende `UserInfo.getOrganizationId()`
-  i hver `/api/generate`-body.  `[GAP i aduck.sf]`
-- **402-håndtering:** `AduckTransformationService` kaster i dag `AduckTransformationException`
-  på alt som ikke er `200 + status:"Ok"`. Legg til en egen gren for `402` med en
-  brukervendt «kvote oppbrukt»-melding.  `[GAP]`
+  mismatch med `400 OrgMismatch`. `AduckTransformationService` sender nå
+  `UserInfo.getOrganizationId()` i hver `/api/generate`-body.
+  `[IMPLEMENTERT — aduck.sf, uncommitted]`
+- **402-håndtering:** `AduckTransformationService` har en egen gren for `402` med en
+  brukervendt «kvote oppbrukt, kjøp mer på aduck.no»-melding.
+  `[IMPLEMENTERT — aduck.sf, uncommitted]`
 - **Én-klikks install:** pakken er `"namespace": ""`, umanagd, ingen install-lenke.
   Krever namespace-registrering + 2GP-pakkeversjon. Eget spor, ute av scope her.
 
@@ -283,12 +287,12 @@ Rust-DB og Django-DB er **separate**. Eneste kobling mellom dem er admin-HTTP-AP
 
 | # | Gap | Blokkerer |
 |---|---|---|
-| 1 | ~~Rust provisjonerings-endpoint~~ **gjort** — branch `feature/admin-key-api` (§5). Ikke bygd/testet lokalt (ingen Rust-toolchain på maskinen); bygg på pike/Windows før merge. | – |
+| 1 | ~~Rust provisjonerings-endpoint~~ **gjort** — branch `feature/admin-key-api` (§5). Verifisert lokalt: `cargo test`/`clippy --no-default-features --features postgres` grønt. Release-bygget (`--target x86_64-unknown-linux-musl`) trenger `musl-tools` (`musl-gcc`) pga. `ring`/`tls-rustls` — ikke installert på maskinen. | – |
 | 2 | ~~`quota_total` i `api_keys`~~ **gjort** — samme branch (§4). | – |
 | 3 | ~~Django `Account` / `OrgRegistration` / `Purchase` + views + dashboard~~ **gjort** — branch `feature/aduck-accounts` (§6). Migrasjon ikke kjørt; ikke deployet. | – |
-| 4 | Ingen registreringslenke/LWC i `aduck.sf`, og Django-ruten (`/accounts/register/`) matcher ikke lenken SYSTEM.md §3.2 antar (`/register/`) (§3.2, §7). | Onboarding-flyt. |
+| 4 | ~~Ingen registreringslenke/LWC i `aduck.sf`; Django-rute-mismatch~~ **gjort** (uncommitted): `Aduck Setup`-fane/LWC i `aduck.sf`, Django-rute flyttet til `/register/` (§3.2, §6). | – |
 | 5 | Kontonøkkel-format og -lagring ikke bestemt. Anbefaling: `secrets.token_urlsafe(32)`, lagret hashet, vist én gang. | §6. |
-| 6 | 402 for oppbrukt kvote — **besluttet og implementert i Rust** (§4). `aduck.sf` må håndtere den (§7). | Feilmelding til sluttbruker. |
+| 6 | ~~402 for oppbrukt kvote~~ **gjort** — implementert i Rust (§4) og håndtert i `aduck.sf` `AduckTransformationService` (§7, uncommitted). | – |
 | 7 | Ingen auth mellom Django og Rust utover delt admin-nøkkel. Godtatt for nå. | – |
 | 8 | `aduck/SALESFORCE.md` og `finnarild-django/docs/aduck-ecosystem.md` har utdaterte URL-er / stier (§1). | Dokumentasjonssamsvar. |
 | 9 | `aduck.sf` er umanagd — ingen én-klikks install-lenke (§7). | AppExchange / enkel install. |
@@ -298,6 +302,6 @@ Rust-DB og Django-DB er **separate**. Eneste kobling mellom dem er admin-HTTP-AP
 
 1. ~~Rust: `quota_total` + admin-API~~ — **gjort**, branch `feature/admin-key-api`, bygd + testet på janeway (cargo check/test/clippy grønt). Gjenstår: PR-review + merge + deploy.
 2. ~~Django: `Account` + kontonøkkel + `register_org` + `account_dashboard`~~ — **gjort**, branch `feature/aduck-accounts`. Gjenstår: PR-review + `manage.py migrate` + deploy + sett env-varene.
-3. `aduck.sf`: registreringslenke (fra `$Organization.Id`) + `salesforce_org_id` i `/api/generate`-body + 402-håndtering i `AduckTransformationService` (§7). Foren Django-ruten med lenken (§3.2).
+3. ~~`aduck.sf`: registreringslenke + `salesforce_org_id` i body + 402-håndtering; foren Django-ruten~~ — **gjort** (uncommitted). Gjenstår: `sf project deploy start` mot en org + Apex-testkjøring, og `git push heroku master` for Django-ruten. `aduck.sf/SALESFORCE.md` §1 har fortsatt gammel endpoint-URL (gap 8).
 4. Django: Stripe + `Purchase.paid_at` + webhook som kaller `PATCH /api/keys` (§3.9).
 5. `aduck.sf`: managed 2GP-pakke for install-lenke (§7).
