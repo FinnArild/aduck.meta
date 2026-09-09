@@ -1,6 +1,7 @@
-# De fire delprosjektene er egne git-repoer med egne remotes og egen livssyklus.
+# Delprosjektene er egne git-repoer med egne remotes og egen livssyklus.
 # Dette meta-repoet sporer bare koblingsdokumentasjonen (SYSTEM.md m.m.).
 /aduck/
 /aduck.heroku/
 /aduck.sf/
 /finnarild-django/
+/sfdx/

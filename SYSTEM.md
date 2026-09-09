@@ -1,11 +1,12 @@
-# aduck — systemkontrakt mellom de fire prosjektene
+# aduck — systemkontrakt mellom prosjektene
 
-Dette dokumentet er den **kanoniske** beskrivelsen av hvordan de fire aduck-repoene
-henger sammen: registrerings-, nøkkel- og kvoteflyten. Der en verdi eller et navn
-finnes her og i et delprosjekts egen dokumentasjon, er **denne fila fasit**.
+Dette dokumentet er den **kanoniske** beskrivelsen av hvordan aduck-repoene
+henger sammen: registrerings-, nøkkel-, kvote- og lead-flyten. Der en verdi eller
+et navn finnes her og i et delprosjekts egen dokumentasjon, er **denne fila fasit**.
 
-Skrevet 2026-08-29. Delprosjektenes egne kontrakter (spesielt `aduck/SALESFORCE.md`)
-er fortsatt autoritative for det de dekker (malsyntaks, config-tre, feiltabell).
+Skrevet 2026-08-29 (CRM-leg lagt til 2026-09-10). Delprosjektenes egne kontrakter
+(spesielt `aduck/SALESFORCE.md`) er fortsatt autoritative for det de dekker
+(malsyntaks, config-tre, feiltabell).
 
 > **Status:** dette er et **målbilde**. Deler er implementert i dag, deler ikke.
 > Se §9 for hva som mangler. Hver seksjon markerer `[FINNES]` / `[GAP]` der det er
@@ -13,18 +14,18 @@ er fortsatt autoritative for det de dekker (malsyntaks, config-tre, feiltabell).
 
 ---
 
-## 1. De fire delene
+## 1. Delene
 
 | Mappe | Rolle | Remote | Deploy |
 |---|---|---|---|
 | `aduck/` | Rust-API. Fyller en Word-mal fra et datatre og returnerer ferdig `.docx`. Eier API-nøkler og kvote. | `github.com:FinnArild/aduck` | bygg → kopier binær til `aduck.heroku/` |
 | `aduck.heroku/` | Deploy-artefakt: den kompilerte binæren + `allowed_cidrs.txt` + `dockerfile` + `heroku.yml`. Ingen kildekode. | egen (Heroku git) | `git push heroku main` |
-| `aduck.sf/` | Salesforce-pakke (SFDX, umanagd). Lar en admin mappe SObject-data til mal-plassholdere og kaller Rust-API-et. | egen | `sf project deploy start` |
-| `finnarild-django/` | Nettsidene. `aduck`-appen (registrering, hjelp, pris, konto) serveres på `aduck.no`. Eier brukere og betaling. | Heroku (`finnarild`) | `git push heroku master` |
+| `aduck.sf/` | Salesforce-**pakke** (SFDX, umanagd) som *kundene* installerer i egne orger. Mapper SObject-data til mal-plassholdere og kaller Rust-API-et. | egen | `sf project deploy start` |
+| `finnarild-django/` | Nettsidene. `aduck`-appen (registrering, hjelp, pris, konto) serveres på `aduck.no`. Eier brukere og betaling. Pusher Leads til CRM-orgen. | Heroku (`finnarild`) | `git push heroku master` |
+| `sfdx/` | Finn Arilds **egen** Salesforce-org (Developer Edition) — CRM. Aduck-kunder havner her som **Leads** (§3.10). Har allerede Person Accounts + `BatchLeadConvert`. Ikke det samme som `aduck.sf`. | `github.com:FinnArild/sfdx` | GitHub Actions (JWT) / manuelt |
 
 Modermappen `/home/finn/Documents/code/aduck/` er et tynt meta-repo som **bare**
-sporer denne dokumentasjonen. De fire undermappene er egne git-repoer og er
-git-ignorert her.
+sporer denne dokumentasjonen. Undermappene er egne git-repoer og er git-ignorert her.
 
 ### Kanoniske verdier
 
@@ -35,6 +36,7 @@ git-ignorert her.
 | Kjerne-endpoint | `POST {base}/api/generate` — header `X-API-Key`, body `{config, payload, salesforce_org_id?}` | `aduck/src/api.rs`, `aduck/SALESFORCE.md` |
 | Liveness | `GET {base}/api/feck` (uautentisert) | `aduck/src/api.rs` |
 | Swagger UI | `{base}/` | `aduck/src/main.rs` |
+| CRM-org (Leads) | Salesforce Developer Edition, login `https://login.salesforce.com`, kilde i `sfdx/`. Django autentiserer med JWT bearer flow mot en connected app. | `sfdx/`, `finnarild-django/aduck/crm.py` `[GAP]` |
 
 ### Kjente utdaterte referanser (denne fila overstyrer)
 
@@ -131,6 +133,11 @@ Salesforce-org  ──per-org API-nøkkel──▶  Rust /api/generate
 
 9. **Kjøp mer.** Stripe checkout i Django (krever `auth.User`) → `Purchase` lagres →
    Django `PATCH /api/keys/<key>` setter ny `quota_total` = trial + sum av kjøp. `[GAP]`
+
+10. **CRM-lead.** Rett etter at `Account` opprettes (steg 3) pusher Django en **Lead**
+    til CRM-orgen (`sfdx/`) via Salesforce REST — best-effort, blokkerer aldri
+    registrering. Idempotent på ekstern ID `aduck_Account_Id__c`. Django lagrer
+    `Account.crm_lead_id`. Etterslep tas av en management command. `[GAP]` — se §10.
 
 ---
 
@@ -278,10 +285,23 @@ Postgres-driver; `sqlite`-feature krever C-kompilator og er dev-only på Windows
 `ADUCK_API_BASE_URL`, `ADUCK_ADMIN_API_KEY`, `ADUCK_TRIAL_TRANSFORMS`,
 Stripe-nøkler (`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, …).
 
-### Databaser
+CRM (§10) `[GAP]`: `SF_CRM_LOGIN_URL` (`https://login.salesforce.com`),
+`SF_CRM_CLIENT_ID` (connected app consumer key), `SF_CRM_USERNAME`
+(integrasjonsbruker), `SF_CRM_JWT_KEY` (privat nøkkel — fra env/secret, **aldri**
+committet).
 
-Rust-DB og Django-DB er **separate**. Eneste kobling mellom dem er admin-HTTP-API-et
-(§5). Ingen delt skjema, ingen delt tilkobling.
+### `sfdx/` (CRM-org)
+
+Ingen kjøretids-config her — deploy-hemmeligheter (`server.key`, consumer key,
+`DECRYPT_KEY`) ligger som GitHub Actions secrets. Merk: `server.key` er i dag
+committet i klartekst — bør roteres.
+
+### Databaser / datalagre
+
+Tre separate lagre: Rust-DB (`api_keys`, `usage_events`), Django-DB (`Account`,
+`OrgRegistration`, `Purchase`), CRM-orgen (`Lead`/`Account` i Salesforce). Eneste
+koblinger: Django → Rust admin-HTTP-API (§5), og Django → CRM Salesforce REST (§10).
+Ingen delt skjema, ingen delt tilkobling.
 
 ---
 
@@ -306,6 +326,8 @@ Rust-DB og Django-DB er **separate**. Eneste kobling mellom dem er admin-HTTP-AP
 | 8 | ~~`aduck/SALESFORCE.md` §1 utdatert URL~~ **gjort** (`92806c2`). `finnarild-django/docs/aduck-ecosystem.md` har fortsatt Windows-stier og gammel struktur, men endpoint-notatene er rettet. | Dokumentasjonssamsvar. |
 | 9 | `aduck.sf` er umanagd — ingen én-klikks install-lenke (§7). | AppExchange / enkel install. |
 | 10 | Betaling: Stripe-integrasjon i Django ikke påbegynt. | Kjøp av flere transformeringer. |
+| 11 | CRM/lead-flyt (`sfdx/`) ikke bygd — connected app, `crm.py`, custom-felt på `Lead`, `Account.crm_lead_id`. Detaljert plan i **§10**. | Kundeoppfølging / salg. |
+| 12 | `sfdx/server.key` er en committet privat nøkkel (JWT). Roter + `.gitignore`. | Sikkerhet. |
 
 ### Anbefalt rekkefølge for implementasjon
 
@@ -321,4 +343,82 @@ Rust-DB og Django-DB er **separate**. Eneste kobling mellom dem er admin-HTTP-AP
 2. **Deploy Django:** `git push heroku master` fra `finnarild-django/`, så `heroku run python manage.py migrate -a finnarild` (migrasjon `0002`).
 3. **Verifiser** konto-dashbordet mot `api.aduck.no` (`/api/keys`, `/api/usage`) — skal ikke lenger gi 403 (allowlist av).
 4. **`aduck.sf` → org:** `sf project deploy start` + `sf apex run test`, sett `Aduck_Api_Setting__c.Base_URL__c = https://api.aduck.no` i orgen.
-5. Deretter gap 5 (kontonøkkel-lagring) og gap 10 (Stripe).
+5. Deretter gap 5 (kontonøkkel-lagring), gap 10 (Stripe), gap 11 (CRM-lead — §10).
+
+---
+
+## 10. CRM / lead-flyt `[GAP — plan, ikke bygd]`
+
+Når noen registrerer seg på `aduck.no` skal de også bli en **Lead** i Finn Arilds
+egen Salesforce-org (`sfdx/`), for oppfølging og salg. Django er den eneste som
+snakker med CRM-orgen. Rust og `aduck.sf` er ikke involvert.
+
+### Prinsipper
+
+- **Best-effort.** Lead-pushen skal *aldri* blokkere eller feile registreringen.
+  Alt i `try/except`, samme mønster som `aduck_api.py`.
+- **Idempotent.** Ekstern ID `aduck_Account_Id__c` på `Lead` = Django `Account.pk`
+  (eller en UUID). Bruk `PATCH .../sobjects/Lead/aduck_Account_Id__c/<id>` (upsert)
+  så retry og dobbel-registrering ikke lager duplikater.
+- **Etterslep.** `Account.crm_lead_id` + `crm_synced_at`; en management command
+  `sync_missing_leads` tar de som feilet.
+- **Ingen hemmeligheter i repo.** JWT-nøkkelen kommer fra env/secret.
+
+### Auth: JWT bearer flow
+
+Connected app i `sfdx`-orgen (samme oppskrift som `sfdx/README.md`):
+1. Egen integrasjonsbruker (f.eks. `aduck-integration@…`) med minimal profil +
+   permission set `Aduck_Integration` (Create/Edit på `Lead` + de nye feltene).
+2. Connected app: «Use digital signatures» med `server.crt`, scopes `api`,
+   `refresh_token`. «Admin approved users are pre-authorized», integrasjonsbrukerens
+   profil/permset lagt til.
+3. Django bytter JWT-assertion → access token på
+   `POST {SF_CRM_LOGIN_URL}/services/oauth2/token`
+   (`grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer`). Cache token til det
+   utløper (org gir typisk 2 t / ingen refresh — hent nytt ved 401).
+
+### Nytt i `sfdx/` (Salesforce-metadata)
+
+- `Lead.aduck_Account_Id__c` — Text(64), **External ID**, Unique.
+- `Lead.aduck_Trial_Transforms__c` — Number (kopi av `ADUCK_TRIAL_TRANSFORMS` ved opprettelse).
+- `Lead.Salesforce_Org_Ids__c` — Long Text (org-id-ene kunden har registrert; oppdateres i §3.6-flyten).
+- `LeadSource` picklist-verdi `aduck.no`.
+- Permission set `Aduck_Integration`.
+- (Connected app deployeres oftest manuelt pga. consumer secret — dokumentér i
+  `sfdx/README.md`.)
+
+### Nytt i `finnarild-django/`
+
+- `aduck/crm.py` — klient, parallell til `aduck_api.py`:
+  `get_token()` (cachet), `upsert_lead(account, *, contact_name, company, email)` →
+  returnerer Salesforce-id. `CrmError` som ikke-fatal exception.
+- `aduck/models.py` — `Account.crm_lead_id` (Char, null), `Account.crm_synced_at`
+  (DateTime, null). Migrasjon `0003`.
+- `aduck/views.py::register` — etter `Account`-opprettelse: `try: crm.upsert_lead(...)
+  except CrmError: logger.warning(...)`.
+- `aduck/management/commands/sync_missing_leads.py` — finn `Account` uten
+  `crm_lead_id`, prøv `upsert_lead` på nytt.
+- `settings.py` — `SF_CRM_LOGIN_URL`, `SF_CRM_CLIENT_ID`, `SF_CRM_USERNAME`,
+  `SF_CRM_JWT_KEY` (§8).
+
+### Lead-felt som sendes
+
+| Lead-felt | Verdi |
+|---|---|
+| `LastName` | kontaktnavn, ellers `User.username` |
+| `Company` | firmanavn fra registreringsskjema, ellers `"(ukjent)"` (Lead krever Company) |
+| `Email` | `User.email` |
+| `LeadSource` | `"aduck.no"` |
+| `aduck_Account_Id__c` | `Account.pk` (ekstern ID, upsert-nøkkel) |
+| `aduck_Trial_Transforms__c` | `ADUCK_TRIAL_TRANSFORMS` |
+
+### Rekkefølge
+
+1. `sfdx/`: legg til feltene + permission set, deploy til orgen, lag connected app +
+   integrasjonsbruker manuelt, noter consumer key.
+2. `finnarild-django/`: `crm.py` + modellfelt + migrasjon `0003` + `register`-hook +
+   management command. Sett `SF_CRM_*` på `finnarild`.
+3. Verifiser: registrer en testkonto på `aduck.no` → Lead dukker opp i CRM-orgen med
+   `LeadSource = aduck.no`. Kjør `sync_missing_leads` og sjekk at den er idempotent.
+4. Senere: oppdater `Salesforce_Org_Ids__c` i §3.6-flyten; Lead → konvertering ved
+   første betaling (kobles til gap 10 / Stripe).
