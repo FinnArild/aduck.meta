@@ -202,7 +202,8 @@ Implementert i:
 Modeller (`finnarild-django/aduck/models.py`):
 
 - **`Account`** — `OneToOneField(User)`, `registration_key_hash` (Django `make_password`),
-  `org_limit` (default `3`), `created_at`. `generate_registration_key()` gir rånøkkelen
+  `company`, `org_limit` (default `3`), `created_at`, `crm_lead_id` / `crm_synced_at`
+  (§10). `generate_registration_key()` gir rånøkkelen
   én gang; `verify_key(raw)` slår opp. **Merk:** `verify_key` scanner alle `Account` og
   kjører `check_password` per rad — O(n) med dyr hashing. Greit nå; bytt til et
   prefiks-/lookup-skjema om brukertallet vokser.
@@ -239,10 +240,10 @@ intakt (sandbox-flyten, §3.6). Fikset samtidig: `LoginView` fikk `next_page` (k
 for `LogoutView`), som fikk hele `aduck.urls` til å feile ved import.
 
 Innstillinger (`finnarild/settings.py`): `ADUCK_API_BASE_URL`, `ADUCK_ADMIN_API_KEY`,
-`ADUCK_TRIAL_TRANSFORMS` (env-drevet). Migrasjon `0002` ikke kjørt.
+`ADUCK_TRIAL_TRANSFORMS`, `SF_CRM_*` (§8, §10) — alt env-drevet.
 
-**Gjenstår:** Sidemaler er norske, mens `base.html`-chrome er engelsk. Migrasjon `0002`
-ikke kjørt, ikke deployet.
+**Gjenstår:** Sidemaler er norske, mens `base.html`-chrome er engelsk. Migrasjonene
+(`0002`–`0004`) ikke kjørt, ikke deployet.
 
 ---
 
@@ -314,8 +315,7 @@ Ingen delt skjema, ingen delt tilkobling.
 > (§1); IP-allowlisten av (§8). CRM-metadata er deployet til `finnarild-dev-ed`;
 > Django-koden er verifisert ende-til-ende mot den orgen men **ikke deployet**.
 > Gjenstår før noe virker i prod: `finnarild` mangler alle config-varene
-> (`ADUCK_ADMIN_API_KEY`, `SF_CRM_*`), Django er ikke deployet, migrasjon `0002`+`0003`
-> ikke kjørt, `aduck.sf` ikke deployet til en org. Se «Neste» nederst.
+> (`ADUCK_ADMIN_API_KEY`, `SF_CRM_*`), Django er ikke deployet, migrasjonene `0002`–`0004` ikke kjørt, `aduck.sf` ikke deployet til en org. Se «Neste» nederst.
 
 | # | Gap | Blokkerer |
 |---|---|---|
@@ -331,7 +331,7 @@ Ingen delt skjema, ingen delt tilkobling.
 | 10 | Betaling: Stripe-integrasjon i Django ikke påbegynt. | Kjøp av flere transformeringer. |
 | 11 | ~~CRM/lead-flyt (`sfdx/`)~~ **bygd + verifisert**, ikke deployet (§10). `sfdx` `5087a40`, `finnarild-django` `a418b2c`. Gjenstår: Django-connected-app + `SF_CRM_*` + deploy. | Kundeoppfølging / salg. |
 | 12 | `sfdx/server.key` er en committet privat nøkkel (JWT). **Ikke brukt** — Django/CLI bruker en fersk nøkkel (`~/.config/sf-jwt/` på janeway). Bør fortsatt fjernes + `.gitignore`. | Sikkerhet. |
-| 13 | ~~Registreringsskjemaet samler ikke e-post~~ **gjort** — `RegistrationForm` (`finnarild-django` `7f16aab`): e-post påkrevd + unik, navn valgfritt. `Company` er fortsatt `"(ukjent)"` (ingen firma-felt / -modell ennå). | CRM-datakvalitet. |
+| 13 | ~~Registreringsskjemaet samler ikke e-post/firma~~ **gjort** — `RegistrationForm` (`finnarild-django` `7f16aab`, `b8ece55`): e-post (påkrevd, unik) + firma (påkrevd, `Account.company`, migrasjon `0004`) + navn (valgfritt). | – |
 
 ### Anbefalt rekkefølge for implementasjon
 
@@ -344,10 +344,10 @@ Ingen delt skjema, ingen delt tilkobling.
 ### Neste (plukk opp her)
 
 1. **`finnarild` config-varer:** `heroku config:set ADUCK_ADMIN_API_KEY=<`aduck`-appens `ADUCK_API_KEY`> -a finnarild`. `ADUCK_API_BASE_URL` faller tilbake til `https://api.aduck.no` i koden, men kan settes eksplisitt.
-2. **Deploy Django:** `git push heroku master` fra `finnarild-django/`, så `heroku run python manage.py migrate -a finnarild` (migrasjon `0002`).
+2. **Deploy Django:** `git push heroku master` fra `finnarild-django/`, så `heroku run python manage.py migrate -a finnarild` (migrasjonene `0002`–`0004`).
 3. **Verifiser** konto-dashbordet mot `api.aduck.no` (`/api/keys`, `/api/usage`) — skal ikke lenger gi 403 (allowlist av).
 4. **`aduck.sf` → org:** `sf project deploy start` + `sf apex run test`, sett `Aduck_Api_Setting__c.Base_URL__c = https://api.aduck.no` i orgen.
-5. **CRM-lead (§10):** Django-connected-app i `sfdx`-orgen + integrasjonsbruker, `SF_CRM_*` på `finnarild`, deploy Django + migrasjon `0003`.
+5. **CRM-lead (§10):** Django-connected-app i `sfdx`-orgen + integrasjonsbruker, `SF_CRM_*` på `finnarild`, deploy Django + migrasjonene.
 6. Deretter gap 5 (kontonøkkel-lagring), gap 10 (Stripe), gap 13 (e-post/firma i registreringsskjemaet).
 
 ---
@@ -361,7 +361,7 @@ med CRM-orgen. Rust og `aduck.sf` er ikke involvert.
 **Status 2026-09-10:** kode + Salesforce-metadata bygd og verifisert ende-til-ende
 mot `finnarild-dev-ed` (JWT-mint, create+update-upsert idempotent, `sync_missing_leads`,
 kryptert-nøkkel-varianten). Gjenstår: connected app for Django (helst egen
-integrasjonsbruker), `SF_CRM_*` på `finnarild`, deploy Django + migrasjon `0003`.
+integrasjonsbruker), `SF_CRM_*` på `finnarild`, deploy Django + migrasjonene.
 
 ### Prinsipper
 
@@ -398,11 +398,12 @@ integrasjonsbruker), `SF_CRM_*` på `finnarild`, deploy Django + migrasjon `0003
   brukeren Django auth-er som — nye felt er ellers usynlige (SOQL: «No such column»).
   Tildelt `finnarild@` nå.
 
-### Bygd i `finnarild-django/` (branch `master`, commit `a418b2c`)
+### Bygd i `finnarild-django/` (branch `master`, `a418b2c` / `7f16aab` / `b8ece55`)
 
 - `aduck/crm.py` — `is_configured()`, `upsert_lead(*, external_id, last_name, company,
   email, first_name, trial_transforms)`, `sync_account(account)`. `CrmError` ikke-fatal.
-- `Account.crm_lead_id` (Char) + `crm_synced_at` (DateTime). Migrasjon `0003`.
+- `Account.crm_lead_id` + `crm_synced_at` (migrasjon `0003`), `Account.company` (`0004`).
+- `aduck/forms.py` `RegistrationForm` — e-post (påkrevd, unik) + firma (påkrevd) + navn.
 - `register()`-hook (best-effort), `sync_missing_leads` management command.
 - `settings.py`: `SF_CRM_LOGIN_URL` / `SF_CRM_CLIENT_ID` / `SF_CRM_USERNAME` /
   `SF_CRM_JWT_KEY`(`_ENC`/`_PASSPHRASE`) (§8). `PyJWT[crypto]` i `requirements.txt`.
@@ -412,7 +413,7 @@ integrasjonsbruker), `SF_CRM_*` på `finnarild`, deploy Django + migrasjon `0003
 | Lead-felt | Verdi |
 |---|---|
 | `LastName` | `User.last_name`, ellers `User.username` |
-| `Company` | `"(ukjent)"` — `[GAP]` skjemaet/modellen har ikke firma ennå |
+| `Company` | `Account.company` (påkrevd i `RegistrationForm`); `"(ukjent)"` for eldre kontoer |
 | `Email` | `User.email` (påkrevd i `RegistrationForm`) |
 | `FirstName` | `User.first_name` hvis satt |
 | `LeadSource` | `"aduck.no"` |
@@ -424,7 +425,7 @@ integrasjonsbruker), `SF_CRM_*` på `finnarild`, deploy Django + migrasjon `0003
    noter consumer key. Dokumentér i `sfdx/README.md`.
 2. `finnarild`: `heroku config:set SF_CRM_CLIENT_ID=… SF_CRM_USERNAME=…
    SF_CRM_JWT_KEY="$(cat key.pem)"` (eller `_ENC`/`_PASSPHRASE`).
-3. `git push heroku master` + `heroku run python manage.py migrate` (0003).
+3. `git push heroku master` + `heroku run python manage.py migrate`.
 4. Verifiser: registrer testkonto på `aduck.no` → Lead med `LeadSource=aduck.no`.
 5. Senere: e-post/firma i skjemaet; `Salesforce_Org_Ids__c` i §3.6; Lead-konvertering
    ved første betaling (gap 10 / Stripe).
