@@ -108,8 +108,9 @@ Salesforce-org  ──per-org API-nøkkel──▶  Rust /api/generate
    lenken treffer. `[GAP]` LWC-en lenker ut, men limer ikke inn nøkkelen automatisk.
 
 3. **Django: konto.** Bruker registrerer seg eller logger inn (`views.register`
-   `[FINNES]` — bruker `UserCreationForm`; login/logout `[FINNES]`). Ved første gangs
-   bruk opprettes `Account` med `registration_key`, og kontonøkkelen vises. `[GAP]`
+   `[FINNES]` — `RegistrationForm` = `UserCreationForm` + påkrevd e-post + navn;
+   login/logout `[FINNES]`). Ved første gangs bruk opprettes `Account` med
+   `registration_key`, kontonøkkelen vises, og en Lead pushes til CRM (§10). `[GAP]`
 
 4. **Django kaller Rust** `POST /api/keys` med admin-hemmeligheten:
    `{salesforce_org_id: <OrgId>, label: "<konto> / <org>", quota_total: ADUCK_TRIAL_TRANSFORMS}`
@@ -330,7 +331,7 @@ Ingen delt skjema, ingen delt tilkobling.
 | 10 | Betaling: Stripe-integrasjon i Django ikke påbegynt. | Kjøp av flere transformeringer. |
 | 11 | ~~CRM/lead-flyt (`sfdx/`)~~ **bygd + verifisert**, ikke deployet (§10). `sfdx` `5087a40`, `finnarild-django` `a418b2c`. Gjenstår: Django-connected-app + `SF_CRM_*` + deploy. | Kundeoppfølging / salg. |
 | 12 | `sfdx/server.key` er en committet privat nøkkel (JWT). **Ikke brukt** — Django/CLI bruker en fersk nøkkel (`~/.config/sf-jwt/` på janeway). Bør fortsatt fjernes + `.gitignore`. | Sikkerhet. |
-| 13 | Registreringsskjemaet samler ikke e-post/firma (`UserCreationForm`), så Leads får tom `Email` og `Company="(ukjent)"` (§10). | CRM-datakvalitet. |
+| 13 | ~~Registreringsskjemaet samler ikke e-post~~ **gjort** — `RegistrationForm` (`finnarild-django` `7f16aab`): e-post påkrevd + unik, navn valgfritt. `Company` er fortsatt `"(ukjent)"` (ingen firma-felt / -modell ennå). | CRM-datakvalitet. |
 
 ### Anbefalt rekkefølge for implementasjon
 
@@ -411,14 +412,11 @@ integrasjonsbruker), `SF_CRM_*` på `finnarild`, deploy Django + migrasjon `0003
 | Lead-felt | Verdi |
 |---|---|
 | `LastName` | `User.last_name`, ellers `User.username` |
-| `Company` | `"(ukjent)"` (registreringsskjemaet samler ikke firma i dag — `UserCreationForm`) |
-| `Email` | `User.email` (tomt i dag — skjemaet samler ikke e-post) |
+| `Company` | `"(ukjent)"` — `[GAP]` skjemaet/modellen har ikke firma ennå |
+| `Email` | `User.email` (påkrevd i `RegistrationForm`) |
 | `FirstName` | `User.first_name` hvis satt |
 | `LeadSource` | `"aduck.no"` |
 | `aduck_Trial_Transforms__c` | `ADUCK_TRIAL_TRANSFORMS` |
-
-`[GAP]` Registreringsskjemaet (`register.html` / `UserCreationForm`) bør utvides med
-e-post + firma — en Lead uten e-post er tynn. Egen liten oppgave.
 
 ### Gjenstår
 
