@@ -329,7 +329,7 @@ Ingen delt skjema, ingen delt tilkobling.
 | 7 | Auth mellom Django og Rust er kun den delte admin-nøkkelen (`ADUCK_API_KEY`). IP-allowlisten er av (§8). Godtatt for nå. | – |
 | 8 | ~~`aduck/SALESFORCE.md` §1 utdatert URL~~ **gjort** (`92806c2`). `finnarild-django/docs/aduck-ecosystem.md` har fortsatt Windows-stier og gammel struktur, men endpoint-notatene er rettet. | Dokumentasjonssamsvar. |
 | 9 | `aduck.sf` er umanagd — ingen én-klikks install-lenke (§7). | AppExchange / enkel install. |
-| 10 | Betaling: Stripe-integrasjon i Django ikke påbegynt. | Kjøp av flere transformeringer. |
+| 10 | Betaling ikke påbegynt. Plan (PayPal-pakker + faktura, felles `apply_payment()`, EHF fra 2027, andre alternativer): `PAYMENTS.md`. | Kjøp av flere transformeringer. |
 | 11 | ~~CRM/lead-flyt (`sfdx/`)~~ **bygd + verifisert**, ikke deployet (§10). `sfdx` `5087a40`, `finnarild-django` `a418b2c`. Gjenstår: Django-connected-app + `SF_CRM_*` + deploy. | Kundeoppfølging / salg. |
 | 12 | `sfdx/server.key` er en committet privat nøkkel (JWT). **Ikke brukt** — Django/CLI bruker en fersk nøkkel (`~/.config/sf-jwt/` på janeway). Bør fortsatt fjernes + `.gitignore`. | Sikkerhet. |
 | 13 | ~~Registreringsskjemaet samler ikke e-post/firma~~ **gjort** — `RegistrationForm` (`finnarild-django` `7f16aab`, `b8ece55`): e-post (påkrevd, unik) + firma (påkrevd, `Account.company`, migrasjon `0004`) + navn (valgfritt). | – |
@@ -340,6 +340,8 @@ Implementert og deployet: `aduck` `1e6a953` (Heroku-release v18), `aduck.sf` `de
 (validert i scratch-org, ikke deployet til en org). Ingen docx→pdf-konvertering — PDF-maler
 er utfyllbare skjemaer som fylles direkte. Kontrakt og begrensninger (ingen løkker, kun
 tekstfelt, Combined virker ikke med PDF): `aduck/SALESFORCE.md` §2a. Bakgrunn: `aduck/PDF.md`.
+Plan for løkker i PDF (nummererte rader, repeterende sider, flytende tabeller): `aduck/PDF.md`,
+seksjonen «Next: loops in PDF templates».
 
 Merk: Heroku-appen `aduck` står normalt på `web=0` (H14/503 på `api.aduck.no` er da
 forventet). Skaler til 1 for test, og tilbake til 0 etterpå.
