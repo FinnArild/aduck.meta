@@ -18,7 +18,7 @@ Skrevet 2026-08-29 (CRM-leg lagt til 2026-09-10). Delprosjektenes egne kontrakte
 
 | Mappe | Rolle | Remote | Deploy |
 |---|---|---|---|
-| `aduck/` | Rust-API. Fyller en Word-mal fra et datatre og returnerer ferdig `.docx`. Eier API-nøkler og kvote. | `github.com:FinnArild/aduck` | bygg → kopier binær til `aduck.heroku/` |
+| `aduck/` | Rust-API. Fyller en mal fra et datatre og returnerer ferdig dokument i samme format: Word-mal → `.docx`, utfyllbart PDF-skjema → PDF. Eier API-nøkler og kvote. | `github.com:FinnArild/aduck` | bygg → kopier binær til `aduck.heroku/` |
 | `aduck.heroku/` | Deploy-artefakt: den kompilerte binæren + `allowed_cidrs.txt` + `dockerfile` + `heroku.yml`. Ingen kildekode. | egen (Heroku git) | `git push heroku main` |
 | `aduck.sf/` | Salesforce-**pakke** (SFDX, umanagd) som *kundene* installerer i egne orger. Mapper SObject-data til mal-plassholdere og kaller Rust-API-et. | egen | `sf project deploy start` |
 | `finnarild-django/` | Nettsidene. `aduck`-appen (registrering, hjelp, pris, konto) serveres på `aduck.no`. Eier brukere og betaling. Pusher Leads til CRM-orgen. | Heroku (`finnarild`) | `git push heroku master` |
@@ -33,7 +33,7 @@ sporer denne dokumentasjonen. Undermappene er egne git-repoer og er git-ignorert
 |---|---|---|
 | Registreringsside | `https://aduck.no/` | `finnarild-django/finnarild/virtualhostmiddleware.py` (`aduck.no` → `aduck.urls`) |
 | Prod-API base-URL | `https://api.aduck.no` (CNAME til Heroku-appen; `aduck-eeb24b32f565.herokuapp.com` svarer fortsatt) | `aduck.sf/.../remoteSiteSettings/Aduck_API.remoteSite-meta.xml` + Apex-tester, `finnarild-django/finnarild/settings.py` |
-| Kjerne-endpoint | `POST {base}/api/generate` — header `X-API-Key`, body `{config, payload, salesforce_org_id?}` | `aduck/src/api.rs`, `aduck/SALESFORCE.md` |
+| Kjerne-endpoint | `POST {base}/api/generate` — header `X-API-Key`, body `{config, payload, salesforce_org_id?}`. `payload` er base64 `.docx` eller PDF; formatet gjenkjennes fra innholdet, ikke et eget felt. | `aduck/src/api.rs`, `aduck/SALESFORCE.md` §2a |
 | Liveness | `GET {base}/api/feck` (uautentisert) | `aduck/src/api.rs` |
 | Swagger UI | `{base}/` | `aduck/src/main.rs` |
 | CRM-org (Leads) | Salesforce Developer Edition, login `https://login.salesforce.com`, kilde i `sfdx/`. Django autentiserer med JWT bearer flow mot en connected app. | `sfdx/`, `finnarild-django/aduck/crm.py` `[GAP]` |
@@ -127,7 +127,8 @@ Salesforce-org  ──per-org API-nøkkel──▶  Rust /api/generate
 
 7. **Bruk akkumuleres.** Hver vellykket `POST /api/generate` logges i Rust
    `usage_events` (`api_key`, `salesforce_org_id`, `template_bytes`, `duration_ms`,
-   `created_at`). `[FINNES]` — `db::record_usage`.
+   `kind` = `docx`/`pdf`, `created_at`). `[FINNES]` — `db::record_usage`. Begge
+   formatene teller likt mot kvoten.
 
 8. **Dashboard.** `aduck.no/account/` kaller Rust `GET /api/usage` for hver av
    kontoens org-nøkler og viser brukt / gjenstående / historikk. `[GAP]`
@@ -186,7 +187,7 @@ avvises med `401`. Uten databasetilkobling svarer de `503`.
 | `GET /api/usage?key=<api_key>` | – | `200` `UsageSummary` / `404` |
 
 - `KeyInfo` = `{api_key, salesforce_org_id, monthly_limit, quota_total, active, used_total, used_this_month}`
-- `UsageSummary` = `{api_key, quota_total, used_total, used_this_month, events: [{salesforce_org_id, template_bytes, duration_ms, created_at}]}` (siste 100, nyeste først; `created_at` = unix-sekunder UTC)
+- `UsageSummary` = `{api_key, quota_total, used_total, used_this_month, events: [{salesforce_org_id, template_bytes, duration_ms, kind, created_at}]}` (`kind` er `null` for hendelser fra før 2026-10-01) (siste 100, nyeste først; `created_at` = unix-sekunder UTC)
 
 Implementert i:
 - `aduck/src/api.rs` — `KeyAdmin` `#[OpenApi]`-struct, registrert i `main.rs`
@@ -332,6 +333,16 @@ Ingen delt skjema, ingen delt tilkobling.
 | 11 | ~~CRM/lead-flyt (`sfdx/`)~~ **bygd + verifisert**, ikke deployet (§10). `sfdx` `5087a40`, `finnarild-django` `a418b2c`. Gjenstår: Django-connected-app + `SF_CRM_*` + deploy. | Kundeoppfølging / salg. |
 | 12 | `sfdx/server.key` er en committet privat nøkkel (JWT). **Ikke brukt** — Django/CLI bruker en fersk nøkkel (`~/.config/sf-jwt/` på janeway). Bør fortsatt fjernes + `.gitignore`. | Sikkerhet. |
 | 13 | ~~Registreringsskjemaet samler ikke e-post/firma~~ **gjort** — `RegistrationForm` (`finnarild-django` `7f16aab`, `b8ece55`): e-post (påkrevd, unik) + firma (påkrevd, `Account.company`, migrasjon `0004`) + navn (valgfritt). | – |
+
+### PDF-maler (2026-10-01)
+
+Implementert og deployet: `aduck` `1e6a953` (Heroku-release v18), `aduck.sf` `de06e4e`
+(validert i scratch-org, ikke deployet til en org). Ingen docx→pdf-konvertering — PDF-maler
+er utfyllbare skjemaer som fylles direkte. Kontrakt og begrensninger (ingen løkker, kun
+tekstfelt, Combined virker ikke med PDF): `aduck/SALESFORCE.md` §2a. Bakgrunn: `aduck/PDF.md`.
+
+Merk: Heroku-appen `aduck` står normalt på `web=0` (H14/503 på `api.aduck.no` er da
+forventet). Skaler til 1 for test, og tilbake til 0 etterpå.
 
 ### Anbefalt rekkefølge for implementasjon
 
