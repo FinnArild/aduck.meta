@@ -31,7 +31,7 @@ sporer denne dokumentasjonen. Undermappene er egne git-repoer og er git-ignorert
 
 | Ting | Verdi | Kilde |
 |---|---|---|
-| Registreringsside | `https://aduck.no/` | `finnarild-django/finnarild/virtualhostmiddleware.py` (`aduck.no` → `aduck.urls`) |
+| Registreringsside | `https://www.aduck.no/` (apex `aduck.no` har **ingen DNS-oppføring** hos MissHosting per 2026-10-03; Heroku har domenet, men apex krever ALIAS/ANAME) | `finnarild-django/finnarild/virtualhostmiddleware.py` (`aduck.no` og `www.aduck.no` → `aduck.urls`) |
 | Prod-API base-URL | `https://api.aduck.no` (CNAME til Heroku-appen; `aduck-eeb24b32f565.herokuapp.com` svarer fortsatt) | `aduck.sf/.../remoteSiteSettings/Aduck_API.remoteSite-meta.xml` + Apex-tester, `finnarild-django/finnarild/settings.py` |
 | Kjerne-endpoint | `POST {base}/api/generate` — header `X-API-Key`, body `{config, payload, salesforce_org_id?}`. `payload` er base64 `.docx` eller PDF; formatet gjenkjennes fra innholdet, ikke et eget felt. | `aduck/src/api.rs`, `aduck/SALESFORCE.md` §2a |
 | Liveness | `GET {base}/api/feck` (uautentisert) | `aduck/src/api.rs` |
@@ -101,7 +101,7 @@ Salesforce-org  ──per-org API-nøkkel──▶  Rust /api/generate
 2. **Admin sendes til registrering.** `Aduck Setup`-fanen (LWC `aduckSetup` +
    `AduckSetupController`) viser org-ID + sandbox-flagg og en knapp til:
    ```
-   https://aduck.no/register/?org_id=<OrgId>[&sandbox=true]
+   https://www.aduck.no/register/?org_id=<OrgId>[&sandbox=true]
    ```
    `<OrgId>` = `UserInfo.getOrganizationId()` (Apex) / `$Organization.Id` (Flow/LWC).
    `[IMPLEMENTERT — aduck.sf, uncommitted]` Django-ruten er nå `/register/` (§6), så
@@ -357,7 +357,7 @@ forventet). Skaler til 1 for test, og tilbake til 0 etterpå.
 ### Neste (plukk opp her)
 
 1. **`finnarild` config-varer:** `heroku config:set ADUCK_ADMIN_API_KEY=<`aduck`-appens `ADUCK_API_KEY`> -a finnarild`. `ADUCK_API_BASE_URL` faller tilbake til `https://api.aduck.no` i koden, men kan settes eksplisitt.
-2. **Deploy Django:** `git push heroku master` fra `finnarild-django/`, så `heroku run python manage.py migrate -a finnarild` (migrasjonene `0002`–`0004`).
+2. **Deploy Django:** `git push heroku master` fra `finnarild-django/`. `Procfile` har nå en `release:`-fase som kjører `migrate` ved hver deploy (2026-10-03), så `0002`–`0004` blir kjørt da. Til det skjer gir innloggede brukere 500 på `/register/` og `/account/` (tabellen `aduck_account` mangler).
 3. **Verifiser** konto-dashbordet mot `api.aduck.no` (`/api/keys`, `/api/usage`) — skal ikke lenger gi 403 (allowlist av).
 4. **`aduck.sf` → org:** `sf project deploy start` + `sf apex run test`, sett `Aduck_Api_Setting__c.Base_URL__c = https://api.aduck.no` i orgen.
 5. **CRM-lead (§10):** Django-connected-app i `sfdx`-orgen + integrasjonsbruker, `SF_CRM_*` på `finnarild`, deploy Django + migrasjonene.
